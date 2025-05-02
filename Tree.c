@@ -1,4 +1,5 @@
 #include "Tree.h"
+#include <stdlib.h>
 
 Tree* new_tree(int (*fcn)(void*, void*), void* data) {
     Tree* t = malloc(sizeof(Tree));
@@ -136,4 +137,74 @@ void delete_tree(Tree* t){
         delete_tree(t->right);
         free(t);
     }
+}
+
+// Helper: Count the nodes in the tree.
+int count_nodes(Tree* t) {
+    if (t == NULL)
+        return 0;
+    return 1 + count_nodes(t->left) + count_nodes(t->right);
+}
+
+// Returns a health score between 0 and 1 for the tree.
+// 1 means the tree's height is as low as possible (ideal balance),
+// while lower values indicate more imbalance (greater height than ideal).
+double tree_health(Tree* t) {
+    if (t == NULL)
+        return 1.0;  // An empty tree is "healthy" by definition.
+    
+    int n = count_nodes(t);
+    int h_actual = get_height(t);
+    
+    // For a perfectly balanced (complete) binary tree, the minimum height is:
+    double h_ideal = ceil(log2(n + 1));
+    
+    double ratio = h_ideal / (double)h_actual;
+    if (ratio > 1.0)
+        ratio = 1.0;  // Cap the health at 1.0
+    return ratio;
+}
+
+Tree* tree_remove(Tree* t, void* data) {
+    if (t == NULL) {
+        return NULL;
+    }
+
+    int comp = t->compare(data, t->data);
+
+    // Locate node to remove
+    if (comp < 0) {
+        t->left = tree_remove(t->left, data);
+    } else if (comp > 0) {
+        t->right = tree_remove(t->right, data);
+    } else {
+        // Node with one or no child
+        if (t->left == NULL) {
+            Tree* temp = t->right;
+            free(t);
+            return temp;
+        } else if (t->right == NULL) {
+            Tree* temp = t->left;
+            free(t);
+            return temp;
+        }
+
+        // Node with two children: Get inorder successor (smallest in right subtree)
+        Tree* successor = t->right;
+        while (successor->left != NULL) {
+            successor = successor->left;
+        }
+
+        // Copy successor data to this node
+        t->data = successor->data;
+
+        // Remove successor
+        t->right = tree_remove(t->right, successor->data);
+    }
+
+    // Update height
+    t->height = 1 + (get_height(t->left) > get_height(t->right) ? get_height(t->left) : get_height(t->right));
+
+    // Rebalance and return
+    return balance(t);
 }

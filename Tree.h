@@ -1,7 +1,7 @@
 #ifndef HEADER_TREE
 #define HEADER_TREE
 #include <stdio.h>
-#include <stdlib.h>
+#include <math.h>
 
 typedef struct Tree {
     struct Tree* left;
@@ -22,4 +22,7 @@ Tree* tree_find(Tree* t, void* data);
 Tree* tree_insert(Tree* t, void* data) ;
 void delete_tree(Tree* t);
 Tree* tree_try(Tree* t, void* data);
+double tree_health(Tree* t);
+int count_nodes(Tree* t);
+Tree* tree_remove(Tree* t, void* data);
 #endif

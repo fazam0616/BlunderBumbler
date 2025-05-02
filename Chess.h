@@ -33,13 +33,19 @@ typedef struct GameBoard{
 typedef struct GameBranch{
     GameBoard board;
     int score;
+    int board_score;
     int alpha;
     int beta;
     struct GameBranch * prev_branch;
-    List* possible_branches;
+    Tree* possible_branches;
     struct GameBranch* best;
-    Turn turn;
     signed long depth;
+
+    /*
+    Turn being WhiteTurn implies the board represents a state
+    where White should move a piece, but hasn't done so yet.
+    */
+    Turn turn;
 
     // LRU tracking
     struct GameBranch* lru_prev;
@@ -49,6 +55,7 @@ typedef struct GameBranch{
 void toggleBitBoardBit(uint64_t* G, int i, int j);
 bool getBitBoardBit(uint64_t* G, int i, int j);
 uint64_t getBlackMask(GameBoard* G);
+uint64_t getWhiteMask(GameBoard* G);
 int getPieceType(GameBoard* G, int i, int j);
 bool toggleGameBoardBit(GameBoard* G, int i, int j);
 void setBitBoardBit(uint64_t* G, int i, int j, uint64_t val);

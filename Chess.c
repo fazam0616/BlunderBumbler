@@ -75,18 +75,18 @@ int position_scores[PIECE_TYPE_COUNT][64] = {
     };
 
 
-void toggleBitBoardBit(uint64_t* G, int i, int j){
+inline void toggleBitBoardBit(uint64_t* G, int i, int j){
     uint64_t mask = (uint64_t)1 << (i*8 + j);
 
     *G ^= mask;
 }
 
-bool getBitBoardBit(uint64_t* G, int i, int j){
+inline bool getBitBoardBit(uint64_t* G, int i, int j){
     uint64_t mask = ((uint64_t)1 << (i * 8 + j)); 
     return ((*G & mask) != 0) ? 1 : 0;
 }
 
-int getPieceType(GameBoard* G, int i, int j) {
+inline int getPieceType(GameBoard* G, int i, int j) {
     int pos = i * 8 + j;
     uint64_t mask = 1ULL << pos;
     if (G->bitboards[PAWN]   & mask) return PAWN;
@@ -101,7 +101,7 @@ int getPieceType(GameBoard* G, int i, int j) {
 
 
 
-uint64_t getBlackMask(GameBoard* G){
+inline uint64_t getBlackMask(GameBoard* G){
     uint64_t all = 0;
 
     for (int i = 0; i < PIECE_TYPE_COUNT; i++){
@@ -111,7 +111,18 @@ uint64_t getBlackMask(GameBoard* G){
     return all & ~G->bitboards[WHITE];
 }
 
-bool toggleGameBoardBit(GameBoard* G, int i, int j){
+
+inline uint64_t getWhiteMask(GameBoard* G){
+    uint64_t all = 0;
+
+    for (int i = 0; i < PIECE_TYPE_COUNT; i++){
+        all |= G->bitboards[i];
+    } 
+
+    return all & G->bitboards[WHITE];
+}
+
+inline bool toggleGameBoardBit(GameBoard* G, int i, int j){
     Piece type = getPieceType(G, i, j);
 
     if (type >= 0){
@@ -122,13 +133,13 @@ bool toggleGameBoardBit(GameBoard* G, int i, int j){
     return false;
 }
 
-void setBitBoardBit(uint64_t* G, int i, int j, uint64_t val){
+inline void setBitBoardBit(uint64_t* G, int i, int j, uint64_t val){
     uint64_t mask = ~((uint64_t)1 << (i*8 + j));
     uint64_t cleared = *G & mask;
     *G = cleared | (val << (i*8 + j));
 }
 
-void setPieceType(GameBoard* G, Piece type, int i, int j){
+inline void setPieceType(GameBoard* G, Piece type, int i, int j){
     for (int t = 0; t<PIECE_TYPE_COUNT;t++){
         setBitBoardBit(&G->bitboards[t], i, j, t == type);
     }
@@ -145,13 +156,6 @@ void initializeBoard(GameBoard* G){
     G->bitboards[WHITE] =   0xFFFF000000000000;
 }
 
-bool isAncestor(GameBranch* G, GameBranch* A, int max_depth){
-    if (max_depth > 0 && G){
-        return G->prev_branch == A || isAncestor(G->prev_branch, A, max_depth-1);
-    }
-    return false;
-}
-
 int compare(void* A, void* B){
     if (A && B){
         signed int diff;
@@ -160,6 +164,7 @@ int compare(void* A, void* B){
             if (diff != 0)
                 return diff;
         }
+        //Compare the turn at the game state
         if (((GameBranch*)A)->turn != ((GameBranch*)B)->turn){
             if (((GameBranch*)A)->turn == WhiteTurn)
                 return 1;
@@ -178,10 +183,11 @@ uint64_t hash(void* G, unsigned long prime) {
     uint64_t seed = prime;  // Use the prime as a seed
     uint64_t c1 = 0x87c37b91114253d5;
     uint64_t c2 = 0x4cf5ad432745937f;
+    GameBranch* branch = (GameBranch*) G;
 
     for (int i = 0; i < BITBOARD_COUNT; i++) {
-        uint64_t k = ((GameBranch*)G)->board.bitboards[i];
-        
+        uint64_t k = branch->board.bitboards[i];
+
         // Mix the key
         k *= c1;
         k = (k << 31) | (k >> (64 - 31));  // Rotate left by 31
@@ -193,49 +199,88 @@ uint64_t hash(void* G, unsigned long prime) {
         h = h * 5 + 0x52dce729;
     }
 
+    // Incorporate the turn into the hash:
+    // Use one constant if it's WhiteTurn and another if it's BlackTurn.
+    uint64_t turnConst = (branch->turn == WhiteTurn) 
+        ? 0xA5A5A5A5A5A5A5A5ULL 
+        : 0x5A5A5A5A5A5A5A5ULL;
+    h ^= turnConst;
+
     // Finalize hash
     h ^= seed;
     h ^= (h >> 33);
-    h *= 0xff51afd7ed558ccd;
+    h *= 0xff51afd7ed558ccdULL;
     h ^= (h >> 33);
-    h *= 0xc4ceb9fe1a85ec53;
+    h *= 0xc4ceb9fe1a85ec53ULL;
     h ^= (h >> 33);
 
     return h;
 }
 
+
 bool pawnMove(GameBoard* G, uint64_t* moves, int i, int j){
     int is_white = getBitBoardBit(&G->bitboards[WHITE], i, j);
     bool isBegin = is_white ? (i == 6) : (i == 1);
     bool returnVal = false;
-    Piece type;
+    int dir = is_white ? -1 : 1;
+    int length = (isBegin ? 3:2);
+    bool front_blocked = false;
 
-    for (int q = 1; q < (isBegin ? 3:2); q++){
-        int dir = is_white ? -1 : 1;
+    
+    for (int q = 1; q < length; q++){
         int posy = i + dir*q;
         if (posy >= 0 && posy < 8){
-            if ((type = getPieceType(G, posy, j)) < 0 || getBitBoardBit(&G->bitboards[WHITE], posy, j) != is_white){
-                //Nothing in front
-                if (type < 0){
-                    setBitBoardBit(moves, posy, j, 1);
-                    returnVal = true;
-                }
-                if (q == 1){// Can't kill people when double stepping
-                    for (int side = -1; side < 2; side += 2){
-                        if (j+side >= 0 && j+side < 8){
-                            if (getBitBoardBit(&G->bitboards[WHITE], posy, j+side) != is_white && getPieceType(G, posy, j+side) >= 0){
-                                setBitBoardBit(moves, posy, j+side, 1);
-                                returnVal = true;
-                            }
+            if ((getPieceType(G, posy, j) < 0) && !front_blocked){
+                setBitBoardBit(moves, posy, j, 1);
+                returnVal = true;
+            }
+            else if (q == 1){
+                front_blocked = true;
+            }
+            
+            if (q == 1){
+                for (int side = -1; side < 2; side += 2){
+                    int j_side = j+side;
+                    if (j_side >= 0 && j_side < 8){
+                        if (getBitBoardBit(&G->bitboards[WHITE], posy, j_side) != is_white && getPieceType(G, posy, j_side) >= 0){
+                            setBitBoardBit(moves, posy, j_side, 1);
+                            returnVal = true;
                         }
                     }
                 }
             }
-            else{
-                break;
-            }
         }
     }
+
+    // for (int q = 1; q < length; q++){
+    //     int posy = i + dir*q;
+    //     if (posy >= 0 && posy < 8){
+    //         if ((type = getPieceType(G, posy, j)) < 0 || getBitBoardBit(&G->bitboards[WHITE], posy, j) != is_white){
+    //             //Nothing in front
+    //             if (type < 0){
+    //                 setBitBoardBit(moves, posy, j, 1);
+    //                 returnVal = true;
+    //             }else{
+
+    //             }
+                
+    //             if (q == 1){// Can't kill people when double stepping
+    //                 for (int side = -1; side < 2; side += 2){
+    //                     int j_side = j+side;
+    //                     if (j_side >= 0 && j_side < 8){
+    //                         if (getBitBoardBit(&G->bitboards[WHITE], posy, j_side) != is_white && getPieceType(G, posy, j_side) >= 0){
+    //                             setBitBoardBit(moves, posy, j_side, 1);
+    //                             returnVal = true;
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         else{
+    //             break;
+    //         }
+    //     }
+    // }
 
     return returnVal;
 }
@@ -384,6 +429,8 @@ void capturePiece(GameBoard* captured, int* captured_count, Piece type, bool is_
     setBitBoardBit(&captured->bitboards[type], *captured_count / 8, *captured_count % 8, 1);
     if (is_white)
         setBitBoardBit(&captured->bitboards[WHITE], *captured_count / 8, *captured_count % 8, 1);
+    else
+        setBitBoardBit(&captured->bitboards[WHITE], *captured_count / 8, *captured_count % 8, 0);
 
     *captured_count += 1;
 }
@@ -495,6 +542,10 @@ Piece find_move(GameBoard* before, GameBoard* after, int* s_i, int* s_j, int* d_
     uint64_t after_occupied = 0;
     GameBoard diff;
     uint64_t changed_positions = 0;
+    int moved_type = -1;
+    Piece captured = -1;
+
+
     for (int i = 0; i < PIECE_TYPE_COUNT; i++) {
         diff.bitboards[i] = before->bitboards[i] ^ after->bitboards[i];
         changed_positions |= diff.bitboards[i];
@@ -513,27 +564,40 @@ Piece find_move(GameBoard* before, GameBoard* after, int* s_i, int* s_j, int* d_
     // Find source square (bit set in before but not in after)
     uint64_t removed_positions = before_occupied & changed_positions;
 
-    // If there's exactly one source and one destination, calculate their indices
-    if (__builtin_popcountll(added_positions) == 1) {
+    
+    if (__builtin_popcountll(added_positions) > 0) {
         int pos = __builtin_ffsll(added_positions) - 1;  // Find the first set bit (0-indexed)
         *d_i = pos / 8;
         *d_j = pos % 8;
+        moved_type = getPieceType(after, *d_i, *d_j);
     }
-    if (__builtin_popcountll(removed_positions) == 1) {
+
+    //Check if a piece captured a instance of it's own class, in a different colour
+    else {
+        // Compute the XOR of the white bitboards to detect differences.
+        uint64_t white_diff = before->bitboards[WHITE] ^ after->bitboards[WHITE];
+        if (__builtin_popcountll(white_diff) > 0) {
+            int pos = __builtin_ffsll(white_diff) - 1;
+            *d_i = pos / 8;
+            *d_j = pos % 8;
+            captured = getPieceType(after, *d_i, *d_j);
+        }
+    }
+
+    if (__builtin_popcountll(removed_positions) > 0) {
         int pos = __builtin_ffsll(removed_positions) - 1;  // Find the first set bit (0-indexed)
         *s_i = pos / 8;
         *s_j = pos % 8;
     }
 
     // Check for capture: Find the piece type removed at the destination square
-    for (int i = 0; i < PIECE_TYPE_COUNT; i++) {
+    for (int i = 0; i < PIECE_TYPE_COUNT && captured < 0; i++) {
         if ((before->bitboards[i] & added_positions) != 0) {
-            return i;  // Return the type of the piece captured
+            captured = i;  // Return the type of the piece captured
         }
     }
 
-    // If no piece was captured, return -1
-    return -1;
+    return captured;
 }
 
 bool isCheckMate(GameBoard* G, bool is_white) {
@@ -541,13 +605,13 @@ bool isCheckMate(GameBoard* G, bool is_white) {
     // For white, use the white mask directly.
     // For black, assume the union of all pieces minus the white mask.
     uint64_t defending;
+    uint64_t allPieces = 0;
+    for (int p = PAWN; p < PIECE_TYPE_COUNT; p++) {
+        allPieces |= G->bitboards[p];
+    }
     if (is_white) {
-        defending = G->bitboards[WHITE];
-    } else {
-        uint64_t allPieces = 0;
-        for (int p = PAWN; p < PIECE_TYPE_COUNT; p++) {
-            allPieces |= G->bitboards[p];
-        }
+        defending = allPieces & G->bitboards[WHITE];
+    } else {  
         defending = allPieces & ~(G->bitboards[WHITE]);
     }
 
@@ -597,24 +661,19 @@ uses it to check the validity of a post-check move
 */
 bool isCheck(GameBoard* G, bool is_white) {
     // The defending king’s position (only the king of the defending color)
-    uint64_t def_color_mask = G->bitboards[WHITE];
+    uint64_t def_color_mask = is_white ? getWhiteMask(G) : getBlackMask(G);
     uint64_t def_king = G->bitboards[KING] & def_color_mask;
     
     // Build a bitboard of all pieces (excluding the WHITE color bitboard which is only for color info).
     // Here we assume your piece types range from PAWN up to PIECE_TYPE_COUNT.
-    uint64_t allPieces = 0;
-    for (int type = PAWN; type < PIECE_TYPE_COUNT; type++) {
-        allPieces |= G->bitboards[type];
-    }
+    uint64_t allPieces = G->bitboards[PAWN] | G->bitboards[ROOK] | G->bitboards[BISHOP] | G->bitboards[KNIGHT]
+                         | G->bitboards[KING] | G->bitboards[QUEEN] | G->bitboards[PROMOTED];
     
     // Determine the attacker mask:
     // If the defending side is white (is_white == true), attackers are black pieces (i.e. not set in G->bitboards[WHITE]).
     // Otherwise, attackers are white pieces.
     uint64_t attackers;
-    if (is_white)
-        attackers = allPieces & ~(G->bitboards[WHITE]);
-    else
-        attackers = allPieces & (G->bitboards[WHITE]);
+    attackers = ~def_color_mask;
     
     uint64_t moves = 0;
     uint64_t tmp;
@@ -643,35 +702,56 @@ bool isCheck(GameBoard* G, bool is_white) {
 }
 
 
-int getScore(GameBoard* prev, GameBoard* after, int s_i, int s_j, int d_i, int d_j){
+int calc_score(GameBoard* prev, GameBoard* after, int s_i, int s_j, int d_i, int d_j, bool is_white){
     int score = 0;
     GameBoard simulate = *prev;
     GameBoard sim_captured;
     memset(&sim_captured, 0, sizeof(GameBoard));
     int sim_captured_num;
-    bool is_white = getBitBoardBit(&prev->bitboards[WHITE], s_i, s_j);
     int type1;
     int type2;
+    bool in_check = false;
+    int min_max = is_white ? 1 : -1;
 
-    score += positionalScore(after, is_white);
-
-    Piece captured = movePiece(&simulate, &sim_captured, &sim_captured_num, s_i, s_j, d_i, d_j);
-    if (captured >= 0)
-        score += pieceValues[captured];
-
-    //Reward putting opponent in check / checkmate
     if (isCheck(after, is_white)){
-        if (isCheckMate(after, is_white)){
-            score += 50;
-        }else{
-            score += 25;
-        }
+        // printf("In check\n");
+        return -500 * min_max;
+    }
+    if (isCheck(prev, is_white)){
+        //Implies we were in check, but the move get's us out of it
+        score += 50 * (min_max);
+        in_check = true;
     }
 
-    //Reward promoting pawns
-    type1 = getPieceType(prev, s_i, s_j);
-    if (type1 == PAWN && (type2 = getPieceType(after, d_i, d_j)) == PROMOTED){
-        score += 10;
+
+    
+    // Piece captured = movePiece(&simulate, &sim_captured, &sim_captured_num, s_i, s_j, d_i, d_j);
+    // if (captured >= 0)
+    //     // if (getBitBoardBit(&prev->bitboards[WHITE], d_i, d_j) != is_white)
+    //         score -= pieceValues[captured] * min_max;
+    //     // else
+    //     //     score -= pieceValues[captured];
+
+    if (!in_check){
+        score += positionalScore(after, is_white) * min_max;
+
+        //Reward putting opponent in check / checkmate
+        if (isCheck(after, !is_white)){
+            if (isCheckMate(after, !is_white)){
+                score += 50000 * min_max;
+            }else{
+                score += 25 * min_max;
+            }
+        }
+
+        //Reward promoting pawns
+        // type1 = getPieceType(prev, s_i, s_j);
+        // if (type1 == PAWN && (type2 = getPieceType(after, d_i, d_j)) == PROMOTED){
+        //     if (getBitBoardBit(&prev->bitboards[WHITE], d_i, d_j) == is_white)
+        //         score += 10 * min_max;
+        //     else   
+        //         score -= 10 * min_max;
+        // }
     }
 
     return score;
@@ -684,7 +764,7 @@ int positionalScore(GameBoard* G, bool is_white){
     for (int i = 0; i<8;i++){
         for (int j = 0; j<8;j++){
             if ((type=getPieceType(G, i, j)) >= 0 && getBitBoardBit(&G->bitboards[WHITE], i, j) == is_white){
-                score += pieceValues[type] + (is_white ?position_scores[type][(7-i)*8+j] : position_scores[type][i*8+j]);
+                score += pieceValues[type]; //+ (is_white ?position_scores[type][(7-i)*8+j] : position_scores[type][i*8+j]);
             }
         }
     }
@@ -692,11 +772,11 @@ int positionalScore(GameBoard* G, bool is_white){
     return score;
 }
 
-void propegateUpdate(GameBranch* G, int max_depth){
-    if (G && max_depth > 0){
-        G->best = NULL;
-        propegateUpdate(G->prev_branch, max_depth -1);
-    }
+
+
+int getScore(GameBoard* prev, GameBoard* after, int s_i, int s_j, int d_i, int d_j){
+    bool is_white = getBitBoardBit(&prev->bitboards[WHITE], s_i, s_j);
+    return calc_score(prev, after, s_i, s_j, d_i, d_j, is_white); //- calc_score(prev, after, s_i, s_j, d_i, d_j, !is_white);
 }
 
 GameBranch* emptyGameBranch(){
@@ -705,13 +785,20 @@ GameBranch* emptyGameBranch(){
     return g;
 }
 
+int score_compare(void* A, void* B){
+    GameBranch* b_a = A;
+    GameBranch* b_b = B;
+
+    return b_b->score - b_a->score;
+}
+
 GameBranch* newGameBranch(Turn t){
     GameBranch* g = emptyGameBranch();
     if (!g){
         printf("Failed to allocate new game branch\n");
         return NULL;
     }
-    g ->possible_branches = new_list();
+    g ->possible_branches = new_tree(&score_compare, NULL);
     g->turn = t;
     g->depth = 0;
     g->beta = INT_MAX;
@@ -724,7 +811,7 @@ GameBranch* newGameBranch(Turn t){
 
 void deleteGameBranch(GameBranch* g){
     if (g){
-        delete_list(g->possible_branches);
+        delete_tree(g->possible_branches);
         if (g->lru_prev)
             g->lru_prev->lru_next = g->lru_next;
         if (g->lru_next)
@@ -736,18 +823,18 @@ void deleteGameBranch(GameBranch* g){
 
 GameBranch* addToPool(Hashmap* H, GameBoard* G, Turn t){
     GameBranch* empty = newGameBranch(t);
-    empty->board = *G;
+    
+    memcpy(&empty->board, G, sizeof(GameBoard));
+    empty->turn = t;
     GameBranch* stored = NULL;
 
     if (!(stored = hash_find(H, empty))){
         stored = empty;
-        stored->depth = -1;
-        hash_insert(H, stored);
+        empty->depth = -1;
+        hash_insert(H, empty);
     }else{
-        free(empty);
+        deleteGameBranch(empty);
     }
-
-    stored->turn = t;
     return stored;
 }
 
@@ -758,7 +845,7 @@ G           The gamebranch to search from
 is_white    Whether WHITE is the Max turn (true) or the min term (false)
 */
 GameBranch* search(Hashmap* H, GameBranch* G,bool is_white, int max_depth){
-    uint64_t color_mask = G->board.bitboards[WHITE];
+    uint64_t color_mask = G->turn == WhiteTurn ? getWhiteMask(&G->board) : getBlackMask(&G->board);
     uint64_t all = 0;
     uint64_t moves;
     Piece type;
@@ -769,27 +856,40 @@ GameBranch* search(Hashmap* H, GameBranch* G,bool is_white, int max_depth){
     GameBranch *stored_branch;
     int added_branches = 0;
     int revisited_branch = 0;
+    bool MAX;
 
     if (max_depth <= 0)
         return G;
-        
     
-    if (is_empty(G->possible_branches)){
-        for (int s_i = 0; s_i < 8; s_i++) {
-            for (int s_j = 0; s_j < 8; s_j++) {
-                bool pieceColor = getBitBoardBit(&color_mask, s_i, s_j);
-                if ((type = getPieceType(&G->board, s_i, s_j)) >= 0 && ((pieceColor && G->turn == BlackTurn) || (!pieceColor && G->turn == WhiteTurn))) {
+        
+    if (!G->possible_branches)
+        G->possible_branches = new_tree(&score_compare, NULL);
+
+    if (is_white){ 
+        MAX = G->turn == WhiteTurn;
+    }else{
+        MAX = G->turn == BlackTurn;
+    }
+    bool generate_moves = true;
+    int tries = 10;
+    
+    if (count_nodes(G->possible_branches) <= 1){
+        for (int s_j = 0; s_j < 8 && generate_moves; s_j++) { 
+            for (int s_i = 0; s_i < 8 && generate_moves; s_i++) {
+                bool is_right_colour = getBitBoardBit(&color_mask, s_i, s_j);
+                if ((type = getPieceType(&G->board, s_i, s_j)) >= 0 && is_right_colour) {
                     uint64_t moves = 0;
                     getMoves(&G->board, &moves, s_i, s_j);
 
                     if (moves != 0) {
-                        for (int d_i = 0; d_i < 8; d_i++) {
-                            for (int d_j = 0; d_j < 8; d_j++) {
+                        for (int d_j = 0; d_j < 8 && generate_moves; d_j++) {
+                            for (int d_i = 0; d_i < 8 && generate_moves; d_i++) {
                                 if (getBitBoardBit(&moves, d_i, d_j)) {
-                                    GameBoard simulated_board = G->board;
+                                    GameBoard simulated_board;
                                     GameBoard simulated_captured;
                                     int captured_num=0;
-
+                                    
+                                    memcpy(&simulated_board, &G->board, sizeof(GameBoard));
                                     movePiece(&simulated_board, &simulated_captured, &captured_num, s_i, s_j, d_i, d_j);
                                     
                                     // memset(&lookup_branch, 0, sizeof(GameBranch));
@@ -798,15 +898,51 @@ GameBranch* search(Hashmap* H, GameBranch* G,bool is_white, int max_depth){
                                     if (stored_branch->depth < 0){
                                         stored_branch->depth = G->depth + 1;
                                         stored_branch->prev_branch = G;
-                                        stored_branch->score = getScore(&G->board, &simulated_board, s_i, s_j, d_i, d_j);
+                                        //Set score before searching in case depth-floor is reached
+                                        stored_branch->board_score = getScore(&G->board, &simulated_board, s_i, s_j, d_i, d_j);
+                                        stored_branch->score = stored_branch->board_score + search(H, stored_branch, is_white, max_depth - 1)->score;
                                         stored_branch->alpha = G->alpha;
                                         stored_branch->beta = G->beta;
                                         added_branches++;
                                     }else{
                                         revisited_branch++;
                                     }
+                                    tree_insert(G->possible_branches, stored_branch);
 
-                                    append(G->possible_branches, stored_branch);
+                                    
+
+                                    if (MAX){
+                                        if (!G->best || G->best->score < stored_branch->score){
+                                            G->best = stored_branch;
+                                            G->score = G->board_score + G->best->score;
+                                        }
+
+                                        G->alpha = fmax(G->alpha, G->best->score);
+                        
+                                        //Prune rest of tree
+                                        if (G->best->score >= G->beta){
+                                            G->best = stored_branch;
+                                            G->score = G->board_score + G->best->score;
+                                            // printf("Alpha prune\n");
+                                            return G->best;
+                                        }
+                                    }
+                                    else{
+                                        if (!G->best || G->best->score > stored_branch->score){
+                                            G->best = stored_branch;
+                                            G->score = G->board_score + stored_branch->score;
+                                        }
+                                        
+                                        G->beta = fmin( G->beta, G->best->score);
+                        
+                                        //Prune rest of tree
+                                        if (G->best->score <= G->alpha){
+                                            G->best = stored_branch;
+                                            G->score = stored_branch->board_score + stored_branch->score;
+                                            // printf("Beta prune\n");
+                                            return G->best;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -817,58 +953,22 @@ GameBranch* search(Hashmap* H, GameBranch* G,bool is_white, int max_depth){
 
     }
     // printf("Added %d new branches\n", added_branches);
-    // printf("Revisited %d old branches\n\n", revisited_branch);
+    // printf("Revisited %d old branches\n\n", revisited_branch); 
 
-    GameBranch* best_branch = NULL;
-    bool MAX;
     if (!G->best) {
-        for (int i = 0; i < G->possible_branches->size; i++) {
-            GameBranch* child = get(G->possible_branches, i);
-            if (is_white){ 
-                MAX = G->turn == WhiteTurn;
-            }else{
-                MAX = G->turn == BlackTurn;
-            }
+        Tree* succ = G->possible_branches;
+        if (MAX)
+            while (succ->right != NULL&& succ->right->data != NULL)
+                succ = succ->right;
+        else 
+            while (succ->left != NULL && succ->left->data != NULL)
+                succ = succ->left;
 
-            //Do mini-max check
-            if (MAX){
-                if (child->score > G->alpha)
-                    G->alpha = child->score;
-
-                //Prune rest of tree
-                if (G->alpha >= G->beta){
-                    G->best = child;
-                    // printf("Alpha prune\n");
-                    return search(H, child, is_white, max_depth - 1);
-                }
-            }
-            else{
-                if (child->score < G->beta)
-                    G->beta = child->score;
-
-                //Prune rest of tree
-                if (G->beta <= G->alpha){
-                    G->best = child;
-                    // printf("Beta prune\n");
-                    return search(H, child, is_white, max_depth - 1);
-                }
-            }
-
-            GameBranch* result = search(H, child, is_white, max_depth - 1);
-
-            if (result && (!best_branch || (MAX ? result->score > best_branch->score : result->score < best_branch->score))) {
-                best_branch = result;
-                G->best = child;
-            }
-
-            // if (child->depth > G->depth){
-                
-            // }
-        }
-        return best_branch;
-    }else{
-        return search(H, G->best, is_white, max_depth - 1);
+        G->best = succ->data;
+        G->score = stored_branch->board_score + G->best->score;
     }
+    return G->best;
+    
 }
 
 const char* piece_names[PIECE_TYPE_COUNT+1] = {"pawn", "bishop", "rook", "knight", "queen", "king", "promoted"};
@@ -878,6 +978,11 @@ void printHistory(GameBranch* B, int depth){
     Piece taken;
     Piece moved;
     if (B){
+        if (B->turn == WhiteTurn)
+            printf("White/Capital (bottom) turn\n");
+        else
+            printf("Black/Lower-Case (top) turn\n");
+
         printBoard(B->board);
         if (depth > 0 && B){
             if(B->best){

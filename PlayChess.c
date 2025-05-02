@@ -83,7 +83,7 @@ int main(void** args){
     GUI* gui = (GUI*)malloc(sizeof(GUI));   
     int mouseX;
     int mouseY;
-    bool clicked;
+    bool clicked = false;
     bool moving;
     bool isPlayerTurn = true;
     int selected = -1;
@@ -91,14 +91,14 @@ int main(void** args){
     bool turnColor = true;
     char text[30];
     int inCheck = 0;
-    Hashmap* SearchTree = new_hashmap(&hash, &compare, 100);
+    Hashmap* SearchTree = new_hashmap(&hash, &compare, 2000);
     GameBranch* new_branch = NULL;
-    int SEARCH_DEPTH = 6;
+    int SEARCH_DEPTH = 5;
 
     if (!init_GUI(gui)) {
         printf("Failed to initialize GUI.\n");
         return -1;
-    }
+    }   
     
     //Initial empty board;
 
@@ -157,7 +157,7 @@ int main(void** args){
 
                     GameBranch* t = new_branch;
 
-                    new_branch = addToPool(SearchTree, &gui->current_board, isPlayerTurn ? WhiteTurn : BlackTurn);
+                    new_branch = addToPool(SearchTree, &gui->current_board, isPlayerTurn ? BlackTurn : WhiteTurn);
                     if (new_branch->depth < 0){
                         new_branch->prev_branch = t;
                         new_branch->score = score;
@@ -168,13 +168,14 @@ int main(void** args){
                         else    
                             new_branch->depth = 0;
                     }
-                    pruneCheck(t, new_branch, SearchTree);
+                    // pruneCheck(t, new_branch, SearchTree);
 
-                    GameBranch* best = search(SearchTree,new_branch, true, SEARCH_DEPTH );
+                    GameBranch* best = search(SearchTree,new_branch, false, SEARCH_DEPTH );
                     printHistory(new_branch, 1);
                     if (best){
                         printf("Best found so far:%d\n", best->score);
                         printf("Explored branches: %ld\n\n", SearchTree->size);
+                        // printf("Table health (higher is better):\t\t%f\n\n", hashmap_health(SearchTree));
 
                         GameBranch* current = best;
                         t = best;
@@ -226,6 +227,7 @@ int main(void** args){
         
         SDL_RenderPresent(gui->renderer);
     }
+    delete_hashmap(SearchTree);
     destroy_GUI(gui);
 
     return 0;

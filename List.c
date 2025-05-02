@@ -8,7 +8,7 @@ bool append(List* l, void* address){
             return false;
         }
         
-        memcpy(new_data, l->data, l->capacity * sizeof(void*));
+        memcpy(new_data, l->data, l->size * sizeof(void*));
         l->capacity = l->capacity * GROWTH;
         free(l->data);
         l->data = new_data;

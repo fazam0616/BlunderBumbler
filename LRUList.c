@@ -61,17 +61,22 @@ bool pruneCheck(GameBranch* prev, GameBranch* next, Hashmap* SearchTree){
     int target = SearchTree->size * 0.1;
     //Was board significantly altered? (Piece captured, pawn moved)
     if ((prev && next)){
-        if (   (type = find_move(&prev->board, &next->board, &s_i, &s_j, &d_i, &d_j) >= 0) || 
-            getBitBoardBit(&prev->board.bitboards[PAWN], s_i, s_j)){
+        type = find_move(&prev->board, &next->board, &s_i, &s_j, &d_i, &d_j);
+        if (type >= 0 || getBitBoardBit(&prev->board.bitboards[PAWN], s_i, s_j)){
             to_evict = lru_evict(SearchTree->lru);
             while (num < target && skip < target){
                 if (to_evict->depth < prev->depth){
-                    //EVICT
-                    if (to_evict->prev_branch){
-                        delete_list(to_evict->prev_branch->possible_branches);
-                        to_evict->prev_branch->possible_branches = NULL;
-                        if (to_evict->prev_branch->best == to_evict)
-                            to_evict->prev_branch->best = NULL;
+                    //EVICTING
+                    GameBranch* parent = to_evict->prev_branch;
+                    if (parent){
+                        printf("Evicted %d branches, skipped %d branches\n", num, skip);
+                        delete_tree(parent->possible_branches);
+                        parent->possible_branches = NULL;
+                        if (parent->best == to_evict)
+                            parent->best = NULL;
+                        
+                        hashmap_remove(SearchTree, to_evict);
+                        
                     }
                     deleteGameBranch(to_evict);
                     num++;
@@ -84,7 +89,7 @@ bool pruneCheck(GameBranch* prev, GameBranch* next, Hashmap* SearchTree){
 
                 to_evict = lru_evict(SearchTree->lru);
             }
-            printf("Evicted %d branches.\n\n", num);
+            printf("Evicted %d branches, skipped over %d branches.\n\n", num, skip);
         }
     }
 }
