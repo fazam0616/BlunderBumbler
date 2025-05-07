@@ -110,7 +110,7 @@ double hashmap_health(Hashmap* H) {
     double load_factor = (H->bucket_num > 0) ? total_nodes / H->bucket_num : 0.0;
     double load_factor_score = (load_factor <= 1.0) ? 1.0 : 1.0 / load_factor;
     printf("Load factor (Lower is better):\t\t\t%f\n", load_factor);
-    // Compute hit rate score (if lookups have been tracked)
+    // Compute hit rate score
     double hit_rate_score = 1.0;
     if (H->lookups > 0)
         hit_rate_score = (double)H->hits / H->lookups;
@@ -118,7 +118,6 @@ double hashmap_health(Hashmap* H) {
     printf("Hit rate (Higher is better):\t\t\t%f\n", hit_rate_score);
     
     // Combine these metrics.
-    // You can adjust the weights as needed. Here we give equal weight.
     double overall = (avg_bucket_health + distribution_score + load_factor_score + hit_rate_score) / 4.0;
     return overall;
 }
